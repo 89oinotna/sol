@@ -1,0 +1,73 @@
+desc: (none)
+cmd: ./osserver
+time_unit: i
+#-----------
+snapshot=0
+#-----------
+time=0
+mem_heap_B=0
+mem_heap_extra_B=0
+mem_stacks_B=0
+heap_tree=empty
+#-----------
+snapshot=1
+#-----------
+time=254571
+mem_heap_B=32816
+mem_heap_extra_B=8
+mem_stacks_B=0
+heap_tree=empty
+#-----------
+snapshot=2
+#-----------
+time=255753
+mem_heap_B=65632
+mem_heap_extra_B=16
+mem_stacks_B=0
+heap_tree=empty
+#-----------
+snapshot=3
+#-----------
+time=256767
+mem_heap_B=65632
+mem_heap_extra_B=16
+mem_stacks_B=0
+heap_tree=peak
+n1: 65632 (heap allocation functions) malloc/new/new[], --alloc-fns, etc.
+ n1: 65632 0x4ADA6D4: opendir (opendir.c:118)
+  n2: 65632 0x10AF5A: count_items (osserver.c:267)
+   n0: 32816 0x10A3A6: main (osserver.c:336)
+   n1: 32816 0x10B066: count_items (osserver.c:290)
+    n0: 32816 0x10A3A6: main (osserver.c:336)
+#-----------
+snapshot=4
+#-----------
+time=256767
+mem_heap_B=32816
+mem_heap_extra_B=8
+mem_stacks_B=0
+heap_tree=empty
+#-----------
+snapshot=5
+#-----------
+time=257266
+mem_heap_B=65632
+mem_heap_extra_B=16
+mem_stacks_B=0
+heap_tree=empty
+#-----------
+snapshot=6
+#-----------
+time=258869
+mem_heap_B=32816
+mem_heap_extra_B=8
+mem_stacks_B=0
+heap_tree=empty
+#-----------
+snapshot=7
+#-----------
+time=258975
+mem_heap_B=0
+mem_heap_extra_B=0
+mem_stacks_B=0
+heap_tree=empty
