@@ -1,3 +1,13 @@
+/*
+ * @file osclient.c
+ * @author Antonio Zegarelli
+ * @brief 
+ * @version 0.1
+ * @date 2019-07-04
+ * 
+ * @copyright Copyright (c) 2019
+ * 
+ */
 #include "libosclient.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,8 +17,8 @@
 
 #include <math.h>
 
-#define START_SIZE 100  // start offset
-#define INC_SIZE 10000   // modify this to reach 100000 bytes
+#define START_SIZE 100  // start 
+#define INC_SIZE 10000   
 
 int totalOp = 0;
 int successOp = 0;
@@ -16,9 +26,10 @@ int failedOp = 0;
 
 void test1() {
     char data_name[3];
-    char data_sing[5] = "123\n";
+    char data_sing[5] = "1234";
     char* data = (char*)malloc(sizeof(char) * START_SIZE);
     int res, i = 0;
+    
     //memset(data, '\0', sizeof(data));
     for (i = 0; i < 20; i++) {
         totalOp++;
@@ -40,6 +51,7 @@ void test1() {
             fprintf(stderr, "RESPONSE: OK\n");
             successOp++;
         }
+        
     }
 
      free(data);
@@ -47,56 +59,75 @@ void test1() {
 /*
 Recuperare oggetti verificando che i contenuti siano corretti**
  */
-void test2() {
-    char* data_name = "test2";
-    char* data_store = "hello";
+void test2(){
+    char data_name[3];
+    char data_sing[5] = "1234";
+    char* data_store = (char*)malloc(sizeof(char) * START_SIZE);
+    int i = 0;
+   
     char* data_retrieve;
-    totalOp++;
-    int res;
-    CK_ZERO(res, os_store(data_name, data_store, strlen(data_store)), "Error STORE");
-    CK_ZERO(data_retrieve, (char*)os_retrieve(data_name), "Error Retrieve");
-
-    if (equal(data_retrieve, data_store)) {
-        successOp++;
+    //memset(data, '\0', sizeof(data));
+    for (i = 0; i < 20; i++) {
+        totalOp++;
+        long current_size = ((i+1)/2*INC_SIZE)+1;
+        if(i==0) current_size=START_SIZE+1;
+        data_store = (char*)realloc(data_store, (sizeof(char) * current_size));
+        sprintf(data_name, "%d", i);
+        int cx=0;
+        while (current_size - cx  > 0) {
+            cx += snprintf(data_store + cx, current_size - cx, "%s", data_sing);
+        }
+        //fprintf(stderr, "NAME: %ld", strlen(data_store));
+        //CK_ZERO(res, os_store(data_name, data_store, strlen(data_store)), "Error STORE");
+        CK_ZERO(data_retrieve, (char*)os_retrieve(data_name), "Error Retrieve");
+        //fprintf(stderr, "\nret: %s\nsto: \n", data_retrieve);
+        if (strncmp(data_retrieve, data_store, current_size)==0) {
+            successOp++;
+            fprintf(stderr, "Test2 OK\n");
+        }
+        else{
+            //fprintf(stderr, "CURRENT SIZE:%ld, DATA%s\n",current_size, data_retrieve);
+            failedOp++;
+            fprintf(stderr, "Test2 KO\n");
+        }
         free(data_retrieve);
-        fprintf(stderr, "Test2 OK\n");
-        return;
     }
-    free(data_retrieve);
-    failedOp++;
-    fprintf(stderr, "Test2 KO\n");
 
+     free(data_store);
 }
 
 /*
 **cancellare oggetti**
 */
 void test3() {
-    char* data_name = "test3";
-    char* data_store = "hello";
-    int res;
-    totalOp++;
-    CK_ZERO(res, os_store(data_name, data_store, strlen(data_store)), "Error STORE");
-    CK_ZERO(res, os_delete(data_name), "Error DELETE");
-
-    if (res != 1) {
-        failedOp++;
-        fprintf(stderr, "Test3 KO\n");
-        return;
+    char data_name[3];
+    int res, i;
+    
+    for (i = 0; i < 20; i++) {
+        totalOp++;
+        sprintf(data_name, "%d", i);
+        CK_ZERO(res, os_delete(data_name), "Error DELETE");
+        if (res != 1) {
+            failedOp++;
+            fprintf(stderr, "Test3 KO\n");
+        }
+        else{
+            successOp++;
+            fprintf(stderr, "Test3 OK\n");
+        }
     }
-    successOp++;
-    fprintf(stderr, "Test3 OK\n");
+    
 }
 
 int main(int argc, char* argv[]) {
     
     if (argc == 1) {
-        fprintf(stderr, "usa: %s stringa \n", argv[0]);
+        fprintf(stderr, "usa: %s nome \n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    if (argc > 1 && strlen(argv[1]) > MAXNAMELEN) {
-        fprintf(stderr, "Name can be max %d char\n", MAXNAMELEN);
+    if (argc > 1 && !match(argv[1], re)) {
+        fprintf(stderr, "Il nome deve essere alfanumerico senza caratteri speciali di lunghezza minima 1 e massima 32");
         exit(EXIT_FAILURE);
     }
 
@@ -145,14 +176,17 @@ int main(int argc, char* argv[]) {
                 3)DELETE\n\
                 4)LEAVE\n");
         scelta = 0;
-        scanf("%d", &scelta);
+        int res;
+        res=scanf("%d", &scelta);
         char dataName[33];
         char* data;
+        
         switch (scelta) {
             case 1:
                 printf("Insert data name:");
-                scanf("%s%*c", dataName);
+                res=scanf("%s%*c", dataName);
                 printf("Insert data:");
+                
                 //scanf("%*c%ms", &data);  // ms alloca data dinamicamente
                 size_t len = 0;
 
@@ -170,30 +204,30 @@ int main(int argc, char* argv[]) {
                 break;
             case 2:
                 printf("Insert data name:");
-                scanf("%s", dataName);
+                res=scanf("%s", dataName);
                 CK_ZERO(data, os_retrieve(dataName), "Error RETRIEVE");
                 
-                fprintf(stderr, "DATA: {%s}", data);
+                if(data!=NULL)fprintf(stderr, "DATA: {%s}", data);
                 free(data);
                 
                 break;
             case 3:
                 printf("Insert data name:");
-                scanf("%s", dataName);
+                res=scanf("%s", dataName);
                 CK_ZERO(res, os_delete(dataName), "Error DELETE");
                 break;
             case 4:
                 CK_ZERO(res, os_disconnect(), "Error LEAVE");
                 //destroyKey();
-                exit(EXIT_SUCCESS);  // Da vedere se terminare il client oppure rendere possibile la connessione
+                exit(EXIT_SUCCESS);  
                 break;
             default:
-                perror("Error");
+                fprintf(stderr, "Incorretto");
+                fflush(NULL);
                 break;
         }
-        // sleep(3);
 
-        fprintf(stderr, "FINE OP\n");
+        //fprintf(stderr, "FINE OP\n");
     }
 
     return 0;

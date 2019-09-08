@@ -1,4 +1,13 @@
-
+/*
+ * @file util.h
+ * @author Antonio Zegarelli
+ * @brief 
+ * @version 0.1
+ * @date 2019-07-04
+ * 
+ * @copyright Copyright (c) 2019
+ * 
+ */
 #if !defined(UTIL_H)
 #define UTIL_H
 #define _XOPEN_SOURCE 500 //per ftw macro
@@ -16,7 +25,8 @@
 
 #define TMP 0
 #define DATA 1
-#define MYERR_LEN 12
+
+#define MYERR_LEN 14
 #define SUCC   200       //"Succesfull Operation"
 #define EUNK    201       //"Unknown Error"
 #define EOPEN   202       //"Errore apertura file"
@@ -29,12 +39,14 @@
 #define ENAME   209       //"Errore nome client"
 #define EDEL    210       //"Errore cancellazione dato"
 #define ESRV    211       //"Errore Server offline"
-
+#define EDATANF 212        //"Errore dato non esistente"
+#define EACONN   213         //"Errore client già connesso"
 
 
 #define SYSCALL(r, c, e)                    \
     if ((r = c) == -1) {  \
-        const char* err=myStrerror(e);                  \
+        myErrno=e;\
+        const char* err=myStrerror();                  \
         perror(err);\
         return 0;                           \
     }  
@@ -43,10 +55,12 @@
         free(message);\
         const char* err;\
         if(errno==SIGPIPE||errno==EPIPE){\
-            err=myStrerror(ESRV);                  \
+            myErrno=ESRV;\
+            err=myStrerror();                  \
         }                    \
         else{\
-            err=myStrerror(e);    \
+            myErrno=e;\
+            err=myStrerror();    \
         } \
         perror(err);\
         return 0;                           \
@@ -79,7 +93,8 @@
     }
 
 #define MALLOC(r, c, e)             \
-    if((r=c)==NULL){                \
+    if((r=c)==NULL){\
+        myErrno=EUNK;              \
         perror(e);                  \
         return 0;                   \
     }
@@ -88,94 +103,138 @@
 
 #define myErrno *_MyErrnoFun()
 
-
-static inline int readn(long fd, void *buf, size_t size) {
-    size_t left = size;
-    int r;
-    char *bufptr = (char*)buf;
-    while(left>0) {
-	    if ((r=read((int)fd ,bufptr,left)) == -1) {
-	        if (errno == EINTR) continue;
-	        return -1;
-	    }
-	    if (r == 0) return 0;   // gestione chiusura socket
-        left    -= r;
-	    bufptr  += r;
-    }
-    return size;
-}
-
-static inline int writen(long fd, void *buf, size_t size) {
-    size_t left = size;
-    int r;
-    char *bufptr = (char*)buf;
-    while(left>0) {
-	    if ((r=write((int)fd ,bufptr,left)) == -1) {
-	        if (errno == EINTR) continue;
-	        return -1;
-	    }
-	    if (r == 0) return 0;  
-        left    -= r;
-	    bufptr  += r;
-    }
-    return 1;
-}
-
-//#define SETERR(e) myErrno=e;
+/*
+ * @brief Array che contiene gli errori
+ * 
+ */
 extern const char* myErrlist[];
 
+/*
+ * @brief pthread_key_t ogni thread ha i suo _myErrno
+ * 
+ */
 pthread_key_t _myErrno;
 
+/*
+ * @brief funzione per fare la free della key quando un thread termina
+ * 
+ * @param parm key
+ */
 void  destr_fn(void *parm);
+
+/**
+ * @brief funzione di retrieve myerrno
+ * 
+ * @return int* myErrno
+ */
 int* _MyErrnoFun();
-void destroyKey();
-
-extern const char* re;
-
-int rmrf(char *path);
 
 /*
-Check if str starts with cmpstr
-Returns 1 if true, 0 if false
-*/
+ * @brief funzione per la cancellazione della key myErrno
+ * 
+ */
+void destroyKey();
+
+/*
+ * @brief RegEx per controllare i nomi
+ * 
+ */
+extern const char* re;
+
+/*
+ * @brief effettua la rimozione di path
+ * 
+ * @param path path da eliminare
+ * @return 0 oppure -1 in caso di errore
+ */
+int rmrf(char *path);
+
+
+/*
+ * @brief Controlla se str inizia con cmpstr
+ * 
+ * @param str 
+ * @param cmpstr 
+ * @return 1 se è verificato oppure 0 altrimenti
+ */
 int startsWith(const char* str, const char* cmpstr);
 
-/*Setta myErrno con e 
-*/
-//void setMyErrno(int e);
-
+/*
+ * @brief Set myErrno From String
+ * 
+ * @param e 
+ */
 void setMyErrnoFromString(char* e);
 
-/*Restituisce la stringa corrispondente al valore di myErrno */
-const char* myStrerror(int err);
+/*
+ * @brief Restituisce la stringa corrispondente al valore di myErrno
+ * 
+ * @return const char* error string
+ */
+const char* myStrerror();
 
-/*Scrive s seguito da myErrno su stderr 
-non è thread safe*/
+/*
+ * @brief Scrive s seguito da myErrno su stderr 
+ * 
+ * @param s 
+ */
 void myPerror(char* s);
 
-/*Restituisce il path DATA o TMP di username */
+/* */
+
+/*
+ * @brief Restituisce il path
+ * 
+ * @param username nome utente
+ * @param s TMP oopure DATA
+ * @return char* path
+ */
 char *getDirPath(char *username, int s);
 
-/*Restituisce il path DATA o TMP del file di username */
+/*
+ * @brief Restituisce il path del file di username
+ * 
+ * @param fileName 
+ * @param username 
+ * @param s DATA o TMP 
+ * @return char* path
+ */
 char *getFilePath(char *fileName, char *username, int s);
 
 /*
-Check if str is equal to cmpstr
-Returns 1 if true, 0 if false
-*/
+ * @brief Controlla che str sia uguale a cmpstr
+ * 
+ * @param str 
+ * @param cmpstr 
+ * @return 1 se true oppure 0 se false
+ */
 int equal(const char *str, const char *cmpstr);
 
-/*Restituisce il messaggio da inviare contenente l'errore in myErrno */
-char* getErrMsg();
+/*
+ * @brief Restituisce il messaggio di errore associato a myErrno
+ * 
+ * @return const char* error
+ */
+const char* getErrMsg();
 
-/*Restituisce la grandezza del file se esiste
-oppure 0 se non esiste 
-oppure -1 se ho errori*/
+/*
+ * @brief Controlla l'esistenza di pathname
+ * 
+ * @param pathname 
+ * @return grandezza del file se esiste,
+ *           0 se non esiste 
+ *           oppure -1 se ho errori
+ */
 long fileExists(char* pathname);
 
-//int sendErrorMsg(long fd, int e);
 
-int isDot(const char dir[]);
-
+/*
+ * @brief funzione per il controllo della RegEx
+ * 
+ * @param string 
+ * @param pattern RegEx
+ * @return int 
+ */
 int match(const char *string, const char *pattern);
+
 #endif 

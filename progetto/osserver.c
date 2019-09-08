@@ -1,4 +1,15 @@
+/*
+ * @file osserver.c
+ * @author Antonio Zegarelli
+ * @brief 
+ * @version 0.1
+ * @date 2019-07-04
+ * 
+ * @copyright Copyright (c) 2019
+ * 
+ */
 #define _POSIX_C_SOURCE 200112L
+#define _XOPEN_SOURCE 500 //per ftw macro
 #include "libosserver.h"
 #include "util.h"
 #include <ctype.h> //testing and mapping char
@@ -11,29 +22,18 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <ftw.h>
 
-
-t_clientList connectedClient;
-long n_items;
-long total_size;
-
-int sendErrorMsg(long fd){
-    char *msg=getErrMsg();
-    //fprintf(stderr,"ERRno: %d", errno);
-    int result=myWrite(fd, msg, strlen(msg)*sizeof(char));
-    free(msg);
-    return result;
-}
-
-int sendOkMsg(long fd){
-    int result=myWrite(fd, "OK \n", 5 * sizeof(char));
-    return result;
-}
+clientList_t connectedClient;
+long nItems;
+long totalSize;
 
 
 
-/*Funzione che gestisce le operazioni del objstore */
-t_client *manageRequest(char *buf, t_client *client) {
+
+
+/*Funzione che gestisce le operazioni dell' objstore */
+client_t *manageRequest(char *buf, client_t *client) {
     char *saveptr;
     char *comand = strtok_r(buf, " ", &saveptr);
 
@@ -58,7 +58,6 @@ t_client *manageRequest(char *buf, t_client *client) {
         else { 
             //fprintf(stderr, "ERROR BUFFER: %s\n", buf);
             myErrno=ECMD; 
-            //setMyErrno(ECMD);
             sendErrorMsg(client->fd);
             free(client->name);
             free(client);
@@ -66,27 +65,27 @@ t_client *manageRequest(char *buf, t_client *client) {
     } 
     else {
         // se è registrato
-        if (equal(comand, "STORE")) {  // Se il file esiste lo sovrascrive (potemo fa come ce pare)
-            // str = strtok(NULL, " ");   // nomefile
+        if (equal(comand, "STORE")) {  // Se il file esiste lo sovrascrive
+            
             char *fileName = strtok_r(NULL, " ", &saveptr);
             char *fileLen = strtok_r(NULL, " ", &saveptr);
             long fileLength = strtol(fileLen, NULL, 10);
 
-            char *fileData = strtok_r(NULL, "\0", &saveptr)+2; // parte di <data> (strtok di \n per dati con spazi)
+            char *fileData = strtok_r(NULL, "\0", &saveptr)+2; // parte di <data> 
             
-            //fprintf(stderr, "IO BOH %s\n", buf);
-            int fExists=os_store(&connectedClient, client, fileData, fileName, fileLength);
+            
+            int fExists=os_store(client, fileData, fileName, fileLength);
             memset(buf, '\0', BUFFER_SIZE);
             if(fExists!=-1){
                 sendOkMsg(client->fd);
                 if(fExists==0){
                 //fprintf(stderr, "NOT EXISTS: %d", fExists);
-                    total_size+= fileLength;
-                    n_items++;
+                    totalSize+= fileLength;
+                    nItems++;
                 }
                 else{
                     //fprintf(stderr, "EXISTS: %d", fExists);
-                    total_size+= fileLength-fExists;
+                    totalSize+= fileLength-fExists;
                 }
             }
             else{
@@ -104,36 +103,34 @@ t_client *manageRequest(char *buf, t_client *client) {
             }
 
             // prepare response message
-            long data_len = strlen(data);
+            long lenData = strlen(data);
 
-            int numOfDigits = log10(data_len) + 1;                          // Numero di char che servono per scrivere lenData
-            char *snum = (char *)malloc((numOfDigits + 1) * sizeof(char));  // stringa per contenere lenData
-            if(snum==NULL){
+            int numOfDigits = log10(lenData) + 1;                          // Numero di char che servono per scrivere lenData
+            char *sLenData = (char *)malloc((numOfDigits + 1) * sizeof(char));  // stringa per contenere lenData
+            if(sLenData==NULL){
                 free(data);
-                //sendErrorMsg(client->fd, errno);
                 myErrno=EUNK;
                 sendErrorMsg(client->fd);
                 return client;
             }
-            sprintf(snum, "%ld", data_len);
+            sprintf(sLenData, "%ld", lenData);
 
-            long response_len = strlen("DATA") + strlen(snum) + strlen(data) + 4 + 1;
+            long response_len = strlen("DATA") + strlen(sLenData) + strlen(data) + 4 + 1;
             
             char *response= (char *)malloc(response_len * sizeof(char));
             if(response==NULL){
                 free(data);
-                free(snum);
-                //sendErrorMsg(client->fd, errno);
+                free(sLenData);
                 myErrno=EUNK;
                 sendErrorMsg(client->fd);
                 return client;
             }
-            snprintf(response, response_len, "DATA %s \n %s", snum, data);
+            snprintf(response, response_len, "DATA %s \n %s", sLenData, data);
 
             //fprintf(stderr, "\nReponse message: %s", response);
-            myWrite(client->fd, response, response_len * sizeof(char));
+            myWrite(client->fd, response, (response_len) * sizeof(char));
 
-            free(snum);
+            free(sLenData);
             free(data);
             free(response);
 
@@ -144,8 +141,8 @@ t_client *manageRequest(char *buf, t_client *client) {
             int res=os_delete(client, dataName);
             if (res != 0) {
                 sendOkMsg(client->fd);
-                n_items--;
-                total_size-=res;
+                nItems--;
+                totalSize-=res;
             }
             else{
                 sendErrorMsg(client->fd);
@@ -162,52 +159,31 @@ t_client *manageRequest(char *buf, t_client *client) {
             
             return NULL;
         } 
-        else {
-            // TODO send reply incorrect request / not logged in
-        }
+        
     }
     return client;
 }
 
 
 
-/*COnto i file presenti nello store */
-void count_items(char *nomedir) {
-    DIR *dir;
-    if ((dir = opendir(nomedir)) == NULL) {
-        perror("opendir");
-        return;
+static int cnt_fun(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf){
+    if(typeflag==FTW_F){ //Se è un file
+        nItems++;
+        totalSize += sb->st_size;
     }
-
-    struct dirent *file;
-
-    while ((file = readdir(dir)) != NULL) {
-        struct stat statbuf;
-        char filename[512];
-        strncpy(filename, nomedir, strlen(nomedir) + 1);
-        strncat(filename, "/", 2);
-        strncat(filename, file->d_name, strlen(file->d_name) + 1);
-
-        if (isDot(filename)) continue;
-
-        if (stat(filename, &statbuf) == -1) {
-            perror("Stat");
-            return;
-        }
-
-        // recursive print if file = directory
-        if (S_ISDIR(statbuf.st_mode))
-            count_items(filename);
-        else {
-            n_items++;
-            total_size += statbuf.st_size;
-        }
-    }
-
-    closedir(dir);
+    return 0;
 }
 
-
+/*
+ * @brief funzione per le sttistiche del server, conta i file e la grandezza totale
+ * 
+ * @param path 
+ * @return int 
+ */
+int count(char *path)
+{
+    return nftw(path, cnt_fun, 64, FTW_DEPTH | FTW_PHYS); //FWD_DEPTH flag means that the contents of the directory will be removed before the directory itself is passed to remove()
+}
 
 volatile sig_atomic_t received=0;
 
@@ -221,12 +197,11 @@ void gestore(int sig) {
     }
 }
 
-void signal_manager() {
+void signalManager() {
     struct sigaction sa;
     // resetto la struttura
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = gestore;
-    // sa.sa_flags = ERESTART;
 
     int notused;
    
@@ -237,8 +212,10 @@ int main(int argc, char *argv[]) {
     
     
     int listenfd=os_start();
-    count_items("data");
-    signal_manager();
+    count("data");  //Controllo i file
+    
+    //countItems("data");
+    signalManager();
     int connfd=-1;
     received=0;
     while (1) {
@@ -246,21 +223,18 @@ int main(int argc, char *argv[]) {
             perror("Error accept");
         }
         if (received == 0){
-            fprintf(stderr, "ACCEPT FD: %d", connfd);
             spawn_thread(&connectedClient, connfd, manageRequest);
         }
         else {
             fprintf(stderr,
                     "\n--------Segnale ricevuto--------\n\
-                Clienti connessi: %d\n\
-                Oggetti store: %ld\n\
-                Size totale store: %ld\n\n\n",
-                    connectedClient.nClient, n_items, total_size);
+                Client connessi: %d\n\
+                Oggetti presenti: %ld\n\
+                Grandezza totale: %ld\n\n\n",
+                    connectedClient.nClient, nItems, totalSize);
             received = 0;
         }
     }
-
-    unlink(SOCKNAME);
 
     return 0;
 }

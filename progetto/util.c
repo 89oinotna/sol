@@ -1,3 +1,13 @@
+/*
+ * @file util.c
+ * @author Antonio Zegarelli
+ * @brief 
+ * @version 0.1
+ * @date 2019-07-04
+ * 
+ * @copyright Copyright (c) 2019
+ * 
+ */
 #include "util.h"
 
 const char* myErrlist[]={
@@ -12,24 +22,29 @@ const char* myErrlist[]={
     "Errore salvataggio dato",
     "Errore nome client",
     "Errore cancellazione dato",
-    "Errore Server offline"
+    "Errore Server offline",
+    "Errore dato non esistente",
+    "Errore client già connesso"
 };
 
-const char* re="^[A-Za-z0-9]{1,32}$";
+const char* re="^[A-Za-z0-9]{1,32}$"; //stringa di soli caratteri o numeri di lunghezza da 1 a 32
 
 int startsWith(const char* str, const char* cmpstr) {
     int slen;
     if (str == NULL || cmpstr == NULL) return 0;
     slen = strlen(cmpstr);
+    // fprintf(stderr, "str: %s\n", str);
     if (strlen(str) < slen) return 0;
+   
     for (int i = 0; i < slen; i++) {
+        //fprintf(stderr, "str: %c, cmp: %c ", str[i] , cmpstr[i]);
         if (str[i] != cmpstr[i]) return 0;
     }
+    //fprintf(stderr, "END\n");
     return 1;
 }
 
-int unlink_cb(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
-{
+static int unlink_cb(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf){
     int rv = remove(fpath);
 
     if (rv)
@@ -78,19 +93,12 @@ int equal(const char *str, const char *cmpstr) {
     return strcmp(str, cmpstr) != 0 ? 0 : 1;
 }
 
-char* getErrMsg(){
-    const char* err=myStrerror(myErrno);
+const char* getErrMsg(){
+    const char* err=myStrerror();
     if(errno!=0)perror(err);
     else fprintf(stderr, "%s\n", err);
-    long len=sizeof(char)*((strlen("KO  \n")+strlen(err)+1));
-    char *msg=(char*)malloc(len);
-    if(msg==NULL){
-        return "KO Errore Memoria \n";
-    }
-    //MALLOC(msg, (char*)malloc(len), "Malloc: ");
-    snprintf(msg, len, "KO %s \n", err);
-    //free(err);
-    return msg;
+    
+    return err;
 }
 
 void  destr_fn(void *parm){
@@ -126,30 +134,17 @@ void destroyKey(){
     pthread_key_delete(_myErrno);
 }
 
-/*void setMyErrno(int e){
-    int* getvalue=&myErrno;
-    if(getvalue!=NULL){
-        *getvalue=e;
-    }
-    
-}*/
 
-const char* myStrerror(int err){
-    int e=err-200;
+
+const char* myStrerror(){
+    int e=myErrno-200;
     const char* buf;
     //fprintf(stderr,"E: %d \tERR: %d\n", e, err);
-    if (err==EUNK) {
-        //buf=(char*) malloc (sizeof(char)*(1+strlen(myErrlist[1])));
-        /*/MALLOC(buf, (char*)malloc(1+strlen(myErrlist[1])), "Malloc: ");
-        strcpy(buf, strerror(err));*/
-        buf=strerror(errno); //NON é TSAFE
+    if (myErrno==EUNK&&errno!=0) {
+        buf=strerror(errno);
         
     } 
     else {
-        myErrno=err;
-        //buf=(char*)malloc(sizeof(char)*(1+strlen(myErrlist[err])));
-        /* MALLOC(buf, (char*)malloc(1+strlen(myErrlist[e])), "Malloc: ");
-        strcpy(buf, myErrlist[e]);*/
         buf=myErrlist[e];
     }
     return buf;
@@ -158,9 +153,8 @@ const char* myStrerror(int err){
 void myPerror(char* s){
     int* getvalue=&myErrno;
     if(/*myErrno*/ getvalue==NULL || *getvalue==0)return;
-    const char* err=myStrerror(*getvalue);
+    const char* err=myStrerror();
     fprintf(stderr, "%s: %s\n", s, err);
-    //free(err);
 }
 
 void setMyErrnoFromString(char* e){
@@ -168,13 +162,13 @@ void setMyErrnoFromString(char* e){
     for(int i=0; i<MYERR_LEN; i++){
        
         if(startsWith(e, myErrlist[i])){
-            //setMyErrno(i+200);
+            
             myErrno=i+200;
             return;
         }
     }
     myErrno=EUNK;
-    //setMyErrno(EUNK);
+    
 }
 
 
@@ -182,19 +176,20 @@ void setMyErrnoFromString(char* e){
 long fileExists(char* pathname){
     struct stat st;
     int res=stat(pathname, &st);
-    if(res==-1&&errno==ENOENT)return 0;
-    else if(res==-1&&errno!=ENOENT) return -1;
+    if(res==-1&&errno==ENOENT){
+
+        myErrno=EDATANF;
+        return 0;
+    }
+    else if(res==-1&&errno!=ENOENT) {
+        myErrno=EUNK;
+        return -1;
+    }
     long size = st.st_size;
     //int res=access(pathname, F_OK);
     return size;
 }
 
-int isDot(const char dir[]) {
-    int l = strlen(dir);
-
-    if ((l > 0 && dir[l - 1] == '.')) return 1;
-    return 0;
-}
 
 
 

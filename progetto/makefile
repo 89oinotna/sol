@@ -56,10 +56,13 @@ libOsServer.a: libosserver.o libosserver.h
 util.a: util.o util.h
 	$(AR) $(ARFLAGS) $@ $<
 
-osclient: osclient.o libOsClient.a util.a
+connection.a: connection.o connection.h
+	$(AR) $(ARFLAGS) $@ $<
+
+osclient: osclient.o libOsClient.a util.a connection.a
 	$(CC) $(CFLAGS) $(INCLUDES) $(OPTFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-osserver: osserver.o libOsServer.a util.a
+osserver: osserver.o libOsServer.a util.a connection.a
 	$(CC) $(CFLAGS) $(INCLUDES) $(OPTFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 clean		: 
@@ -69,5 +72,5 @@ cleanall	: clean
 	\rm -rf data tmp
 test		:
 	> testout.log
-	bash looptest.sh
+	bash test.sh
 	bash testsum.sh

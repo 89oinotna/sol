@@ -1,59 +1,86 @@
+/**
+ * @file libosserver.c
+ * @author Antonio Zegarelli
+ * @brief 
+ * @version 0.1
+ * @date 2019-07-04
+ * 
+ * @copyright Copyright (c) 2019
+ * 
+ */
 #include "libosserver.h"
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;  // Mutex variabile di mutua esclusione
+static int listenfd; //fd principale del server
 
 
-void cleanup_thread_handler(void *arg) { 
-    t_cleanUpTh* cl=(t_cleanUpTh*)arg;
-    pthread_mutex_unlock(&mutex); 
-    removeClient(cl->connectedClient, cl->client);
-}
-
+/**
+ * @brief funzione gestire il segnale
+ * 
+ * @param sig segnale da gestire
+ */
 static void gestore(int sig) { 
-    char cwd[256];
-    switch(sig){
+    
+    rmrf("tmp");  //Rimuovo tmp
+    
+    
+    close(listenfd);
+    cleanup(SOCKNAME);
+    exit(EXIT_SUCCESS);
+    /*switch(sig){
         case SIGINT:
-            /*//char* s;
             
-            if (getcwd(cwd, sizeof(cwd)) == NULL) perror("getcwd() error");
-            system(cwd);*/
-            if(getcwd(cwd, sizeof(cwd))){
-                strcat(cwd, "/tmp");
-                //fprintf(stderr, "CWD: %s\n", cwd);
-                rmrf(cwd);
+            
+            if(getcwd(cwd, sizeof(cwd))){ //getcwd restituisce il path della working dir
+                strcat(cwd, "/tmp"); //Creo la stringa con il percorso
+                rmrf(cwd);  //Rimuovo tmp
             }
-            //snprintf(cwd, sizeof(cwd), "s/tmp", getcwd(cwd, sizeof(cwd)));
             
-            
-            cleanup();
+            close(listenfd);
+            cleanup(SOCKNAME);
             exit(EXIT_SUCCESS);
             break;
         break;
+        
         default:
             break;
-    }
+    }*/
 }
 
-static void signal_manager() {
+/**
+ * @brief funzione per la gestione dei segnali
+ * 
+ */
+static void signalManager() {
+    struct sigaction new_actn, old_actn;
+     //Ignoro SIGPIPE
+    new_actn.sa_handler = SIG_IGN;
+    sigemptyset (&new_actn.sa_mask);
+    new_actn.sa_flags = 0;
+    int notused;
+    SYSCALLP(notused, sigaction (SIGPIPE, &new_actn, &old_actn), "Error sigaction");  
+
     struct sigaction sa;
     // resetto la struttura
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = gestore;
-    // sa.sa_flags = ERESTART;
 
-    int notused;
-   
+    
     SYSCALLP(notused, sigaction(SIGINT, &sa, NULL), "Error sigaction");
+    SYSCALLP(notused, sigaction(SIGTERM, &sa, NULL), "Error sigaction");
+    SYSCALLP(notused, sigaction(SIGQUIT, &sa, NULL), "Error sigaction");
 }
 
 void cleanup() { unlink(SOCKNAME); }
 
+
 int os_start(){
     cleanup();
+    //creazione cartelle
     if (mkdir("data", 0777) == -1 && errno != EEXIST) exit(1);
     if (mkdir("tmp", 0777) == -1 && errno != EEXIST) exit(1);
-    signal_manager();       //delete on exit
-    int listenfd = -1;
+    signalManager();       
+    //socket
     SYSCALLP(listenfd, socket(AF_UNIX, SOCK_STREAM, 0), "Error socket");
 
     struct sockaddr_un serv_addr;
@@ -64,34 +91,29 @@ int os_start(){
     int notused;
     SYSCALLP(notused, bind(listenfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)), "Error bind");
     SYSCALLP(notused, listen(listenfd, MAXBACKLOG), "Error listen");
+    fprintf(stderr, "-------Server Started-------\n");
+    fflush(NULL);
     return listenfd;
 }
 
-/*
-Inizializza un client da inserire nella lista
-return pointer a client
- */
-t_client *initClient(long fd) {
-    t_client *client;// = (t_client *)malloc(sizeof(t_client));
-    MALLOC(client, (t_client *)malloc(sizeof(t_client)), "MALLOC");
+
+client_t *initClient(long fd) {
+    client_t *client;
+    MALLOC(client, (client_t *)malloc(sizeof(client_t)), "MALLOC");
     client->next = NULL;
     client->name = NULL;
     client->fd = fd;
-    // n_client++;
+    
     return client;
 }
 
-/*
-Verifica se un client è già connesso
-return 1 se connesso 0 altrimenti
- */
-int Connected(t_clientList* connectedClient, char *name) {
-    //fprintf(stderr, "Connected:  %s\n", name);
 
-    t_client *curr = connectedClient->head;
+int connected(clientList_t* connectedClient, char *name) {
+    //fprintf(stderr, "connected:  %s\n", name);
 
+    client_t *curr = connectedClient->head;
+    //scorro la lista
     while (curr != NULL) {
-        // fprintf(stderr, "%s = %s\n", name, curr->name);
         if (equal(name, curr->name)) return 1;
         curr = curr->next;
     }
@@ -99,20 +121,14 @@ int Connected(t_clientList* connectedClient, char *name) {
     return 0;
 }
 
-/*
-Aggiunge il client alla lista
-return pointer al client
- */
-t_client *addClient(t_clientList* connectedClient, t_client *client, char *name) {
+
+client_t *addClient(clientList_t* connectedClient, client_t *client, char *name) {
     //fprintf(stderr, "%s ", name);
-    /*t_cleanUpTh cl;
-    cl.client=client;
-    cl.connectedClient=connectedClient;*/
-    //pthread_cleanup_push(cleanup_thread_handler, &cl);
+    myErrno=ECLI;
     
     pthread_mutex_lock(&mutex);  // Acquisizione della LOCK
 
-    if (connectedClient->head == NULL) {
+    if (connectedClient->head == NULL) {    //lista vuota
         connectedClient->head = client;
         client->name= (char *)malloc(sizeof(char) * strlen(name) + 1);
         if(client->name==NULL){
@@ -125,23 +141,23 @@ t_client *addClient(t_clientList* connectedClient, t_client *client, char *name)
         return client;
     }
 
-    if (Connected(connectedClient, name)) {
+    if (connected(connectedClient, name)) { //Controllo che non sia già connesso
         //fprintf(stderr, "GIA CONNESSO");
+        myErrno=EACONN;
         pthread_mutex_unlock(&mutex);
         return client;
     }
 
-    t_client *curr = connectedClient->head;
+    client_t *curr = connectedClient->head;
 
-    while (curr->next != NULL) curr = curr->next;
-    /*
-    t_client *new = (t_client *)malloc(sizeof(t_client));*/
+    while (curr->next != NULL) curr = curr->next; //Scorro la lista
+    
     client->name = (char *)malloc(sizeof(char) * (strlen(name) + 1));
     if(client->name==NULL) {
+        
         pthread_mutex_unlock(&mutex);
         return client;
     }
-    // new->next = NULL;
 
     strcpy(client->name, name);
 
@@ -149,25 +165,21 @@ t_client *addClient(t_clientList* connectedClient, t_client *client, char *name)
 
     connectedClient->nClient++;
     pthread_mutex_unlock(&mutex);  // Rilascio della LOCK
-    //pthread_cleanup_pop(0);
+    myErrno=SUCC;
     return client;
 }
 
-void removeClient(t_clientList* connectedClient, t_client *client) {
-    t_client *curr;
-    /*t_cleanUpTh cl;
-    cl.client=client;
-    cl.connectedClient=connectedClient;*/
-    //pthread_cleanup_push(cleanup_thread_handler, &cl);
+void removeClient(clientList_t* connectedClient, client_t *client) {
+    client_t *curr;
     pthread_mutex_lock(&mutex);  // Acquisizione della LOCK
     curr = connectedClient->head;
-    t_client *prev = NULL;
+    client_t *prev = NULL;
     if (client == NULL || curr == NULL || client->name == NULL  /*|| n_client == 0*/) {
         pthread_mutex_unlock(&mutex);
         return;
     }
     //fprintf(stderr, "{%s}\n", client->name);
-    while (curr->next != NULL && client != curr) {
+    while (curr->next != NULL && client != curr) {  //Cerco il client da rimuovere
         prev = curr;
         curr = curr->next;
     }
@@ -176,21 +188,19 @@ void removeClient(t_clientList* connectedClient, t_client *client) {
     } else {
         prev->next = curr->next;
     }
-    fprintf(stderr, "   rmv client: n:{%d}, name: {%s} \n", connectedClient->nClient, curr->name);
     connectedClient->nClient--;
     pthread_mutex_unlock(&mutex); // Rilascio della LOCK
-    //pthread_cleanup_pop(0);
+    
     free(curr->name);
     free(curr);  
 }
 
 void *threadF(void *arg) {
-    printf("New thread started\n");
+    
     args_handler_t* args=(args_handler_t*)arg;
-    fprintf(stderr, "FD: %ld\n", args->fdc);
-    t_client *client = initClient(args->fdc);
+    //fprintf(stderr, "New thread started with FD: %ld\n", args->fdc);
+    client_t *client = initClient(args->fdc);   //inizializzo il client
     if(client==NULL){
-        //setMyErrno(ECLI);
         myErrno=ECLI;
         sendErrorMsg(args->fdc);
         return NULL;
@@ -198,23 +208,21 @@ void *threadF(void *arg) {
     char buffer[BUFFER_SIZE+1];     //+1 per terminazione
     memset(buffer, '\0', BUFFER_SIZE+1);
     int result = -1;
-    /*t_cleanUpTh cl;
-    cl.client=client;
-    cl.connectedClient=args->connectedClient;*/
+
     do {
         memset(buffer, '\0', BUFFER_SIZE);
-        SYSCALL(result, read(args->fdc, buffer, BUFFER_SIZE), EREAD);
-        if (result < 1) break;
+        SYSCALL(result, read(args->fdc, buffer, BUFFER_SIZE), EREAD); //Leggo la richiesta
+        if (result < 1) {
+            fprintf(stderr, "Disconnesso: {%s}\n", client->name);
+            break;
+        }
         //fprintf(stderr, "RES: %d", result);
-        //DEBUG_BUFFER(buffer, result);
         
-        //if (client == NULL) break;
-        client = args->manage(buffer, client);
-        //fprintf(stderr, "	Thread F: %s %d \n", client->name, result);
+        client = args->manage(buffer, client); //Gestisco la richista
+
     } while (client!=NULL);
-    //free(buffer);
     
-    if(client!=NULL)removeClient(args->connectedClient, client);
+    if(client!=NULL)removeClient(args->connectedClient, client); //Rimuovi il client se è uscito dopo errore sulla read (prob socket chiuso)
     
     close(args->fdc);
     free(args);
@@ -223,19 +231,15 @@ void *threadF(void *arg) {
     return NULL;
 }
 
-void printThrdError(int connfd, char *msg) {
-    fprintf(stderr, "%s", msg);
-    close(connfd);
-}
 
-void spawn_thread(t_clientList* connectedClient, long connfd, void *manageRequest) {
+void spawn_thread(clientList_t* connectedClient, long connfd, void *manageRequest) {
     pthread_attr_t thattr;
     pthread_t thid;
     args_handler_t* args=(args_handler_t*)malloc(sizeof(args_handler_t));
     args->fdc=connfd;
     args->manage=manageRequest;
     args->connectedClient=connectedClient;
-    fprintf(stderr, "FD: %ld\n", args->fdc);
+    //fprintf(stderr, "FD: %ld\n", args->fdc);
     
     if (pthread_attr_init(&thattr) != 0) {
         fprintf(stderr, "pthread_attr_init FALLITA\n");
@@ -259,59 +263,33 @@ void spawn_thread(t_clientList* connectedClient, long connfd, void *manageReques
 
 }
 
-int myWrite(long fd, char* msg, size_t len){
+
+
+int save(char* tmpFilePath, char* permFilePath){
     int result;
-    SYSCALL(result, write(fd, msg, len), ESND);
+    SYSCALL(result, rename(tmpFilePath, permFilePath), ESAVE); 
     return 1;
 }
 
-int myRead(long fd, char* buf){
-    int result;
-    SYSCALL(result, read(fd, buf, BUFFER_SIZE), EREAD);
-    return 1;
-}
-
-int save(char* fileToWrite, char* fileToWriteN){
-    int result;
-    SYSCALL(result, rename(fileToWrite, fileToWriteN), ESAVE); 
-    return 1;
-}
-
-void disconnectAll(t_clientList *connectedClient){
-    t_client* curr=connectedClient->head;
-    while(curr){
-        t_client* next=curr->next;
-        //setMyErrno(ESRV);
-        myErrno=ESRV;
-        sendErrorMsg(curr->fd);
-        removeClient(connectedClient, curr);
-        curr=next;
-    }
-} 
 
 
-t_client* os_register(t_clientList* connectedClient, t_client * client, char* user){
-    //char* re="^[A-Za-z0-9]{2,32}$";
-    if(!match(user, re)){
+
+client_t* os_register(clientList_t* connectedClient, client_t * client, char* user){
+    if(!match(user, re)){ //Controllo sul nome
         myErrno=ENAME;
         return client;
     }
 
-    client = addClient(connectedClient, client, user);
-    //int result;
+    client = addClient(connectedClient, client, user); //aggiungo il client
     if (client->name==NULL) {
-        //sendErrorMsg(client->fd, ECLI);
-        //setMyErrno(ECLI);
-        myErrno=ECLI;
         
         return client;
     }
+
     //fprintf(stderr, "	INIT MANAGE REQ 2:  (%s)\n", client->name);
     char *tmpDirPath = getDirPath(client->name, TMP); //tmp path
     if (mkdir(tmpDirPath, 0777) == -1 && errno != EEXIST) {
         removeClient(connectedClient, client);
-        //sendErrorMsg(client->fd, ECLI);
-        //setMyErrno(ECLI);
         myErrno=ECLI;
         free(tmpDirPath);
         //free(client->name);
@@ -321,181 +299,175 @@ t_client* os_register(t_clientList* connectedClient, t_client * client, char* us
     char *dirPath = getDirPath(client->name, DATA); //store path
     if (mkdir(dirPath, 0777) == -1 && errno != EEXIST) {
         removeClient(connectedClient, client);
-        //sendErrorMsg(client->fd, ECLI);
-        //setMyErrno(ECLI);
         myErrno=ECLI;
         free(dirPath);
-        //free(client->name);
         return client;
     }
     free(dirPath);
     free(tmpDirPath);
-    //fprintf(stderr, "	REGISTER: %s %d \n", client->name, result);
+    fprintf(stderr, "REGISTERED: Client name {%s} \n", client->name);
     
     return client;
 }
 
-long os_store(t_clientList* connectedClient, t_client* client, char* fileData, char* fileName, long fileLength){
-    if(!match(fileName, re)){
+long os_store(client_t* client, char* fileData, char* fileName, long fileLength){
+    if(!match(fileName, re)){ //controllo sul fileName
         myErrno=EPATH;
-        return 0;
-    }
-    
-    char *fileToWrite = getFilePath(fileName, client->name, TMP);   //used as tmp file
-    char *fileToWriteN = getFilePath(fileName, client->name, DATA);
-    long lenFirstRead = strlen(fileData);
-    //fprintf(stderr, "FNAME: %s\n FLEN: %s\n FLEN: %ld\n FTW: %s\n", fileName, fileLen, fileLength, fileToWrite);
-    
-    int result;
-    int count=lenFirstRead;
-    
-    FILE *fp1;
-    CK_EQ(fp1 = fopen(fileToWrite, "wb"), NULL, EOPEN);
-
-    if (fp1 == NULL) {
-        //sendErrorMsg(client->fd, EOPEN);
-        //setMyErrno(EOPEN);
-        myErrno=EOPEN;
-        free(fileToWrite);
-        free(fileToWriteN);
         return -1;
     }
-    long nReadLeft = (long)ceil((double)(fileLength - lenFirstRead) / BUFFER_SIZE);
+    
+    char *tmpFilePath = getFilePath(fileName, client->name, TMP);   //used as tmp file
+    
+    long lenFirstRead = strlen(fileData);
+    //fprintf(stderr, "FNAME: %s\n FLEN: %s\n FLEN: %ld\n FTW: %s\n", fileName, fileLen, fileLength, tmpFilePath);
+    
+    
+    FILE *fp1;
+    CK_EQ(fp1 = fopen(tmpFilePath, "wb"), NULL, EOPEN);
+
+    if (fp1 == NULL) {
+        myErrno=EOPEN;
+        free(tmpFilePath);
+        return -1;
+    }
+    long nReadLeft = (long)ceil((double)(fileLength - lenFirstRead) / BUFFER_SIZE); //approssima superiormente
     int res = fwrite(fileData, sizeof(char), lenFirstRead, fp1);
     //fprintf(stderr, "RES:%d\n", res);
-    //fprintf(stderr, "IO BOH");
     char buf[BUFFER_SIZE];
-    while (nReadLeft > 0) {
+    while (nReadLeft > 0) { //utilizzo il buffer perchè non ho bisogno di allocare tutto
         if(nReadLeft==1)memset(buf, '\0', BUFFER_SIZE);
-        //fprintf(stderr, "RES: %d\n", result);
-        
         
         res=myRead(client->fd, buf);
         if(!res){
-            //sendErrorMsg(client->fd, EREAD);
-            //setMyErrno(EREAD);
             myErrno=EREAD;
-            free(fileToWrite);
-            free(fileToWriteN);
+            free(tmpFilePath);
             fclose(fp1);
             return -1;
         }
         
-        //count+=result;
-        //fprintf(stderr, "%s\n", buf);
-        res=fwrite(buf, sizeof(char), (nReadLeft > 1) ? sizeof(char) * BUFFER_SIZE : sizeof(char) * ((fileLength - lenFirstRead) % BUFFER_SIZE),
-                fp1);
+        res=fwrite(buf, sizeof(char), (nReadLeft > 1) ? 
+                                                        sizeof(char) * BUFFER_SIZE : 
+                                                        sizeof(char) * ((fileLength - lenFirstRead) % BUFFER_SIZE), 
+                    fp1);
         //fprintf(stderr, "COUNT: %d\n", res);
         nReadLeft--;
     }
     
-    //
-    fclose(fp1);
     
-    //fprintf(stderr, "ftwn: %s\n", fileToWriteN);
-    long fExists=fileExists(fileToWriteN);
+    fclose(fp1);
+    char *permFilePath = getFilePath(fileName, client->name, DATA); //path data
+   
+    long fExists=fileExists(permFilePath); //controllo file
     if(fExists==-1){
-        //sendErrorMsg(client->fd, ESAVE);
-        //setMyErrno(ESAVE);
         myErrno=ESAVE;
         return -1;
     }
-    res=save(fileToWrite, fileToWriteN);    //move from tmp to the store
-    free(fileToWrite);
-    free(fileToWriteN);
+    res=save(tmpFilePath, permFilePath);    //move from tmp to the store
+    free(tmpFilePath);
+    free(permFilePath);
     if(!res){
-            //sendErrorMsg(client->fd, ESAVE);
-            //setMyErrno(ESAVE);
             myErrno=ESAVE;
-            return 0;
+            return -1;
     }
-        // add file length
     
-    
+    fprintf(stderr, "STORED: Client name {%s}, File Name {%s}, Lenght {%ld}\n", client->name, fileName, fileLength);
     return fExists;
 }
 
-void* os_retrieve(t_client* client, char* fileName){
-    int path_len = strlen("data") + strlen(client->name) + strlen(fileName) + 2 + 1 + 4; //+4 .dat
-            char *pathname = (char *)malloc(path_len * sizeof(char));
-            if(pathname==NULL){
-                //sendErrorMsg(client->fd, errno);
-                //setMyErrno(EUNK);
-                myErrno=EUNK;
-                return NULL;
-            }
+void* os_retrieve(client_t* client, char* fileName){
+    int path_len = strlen("data") + strlen(client->name) + strlen(fileName) + 2 + 1 + 4; //+2 //, +4 .bin, +1 terminazione
+    char *pathname = (char *)malloc(path_len * sizeof(char));
+    if(pathname==NULL){
+        myErrno=EUNK;
+        return NULL;
+    }
 
-            snprintf(pathname, path_len, "%s/%s/%s.bin", "data", client->name, fileName);
+    snprintf(pathname, path_len, "%s/%s/%s.bin", "data", client->name, fileName);
 
-            //fprintf(stderr, "Pathname: %s", pathname);
+    //fprintf(stderr, "Pathname: %s", pathname);
 
-            // open the file
-            FILE *fpr;
-            fpr = fopen(pathname, "rb");
+    // open the file
+    FILE *fpr;
+    fpr = fopen(pathname, "rb");
 
-            // file error
-            int result = 0;
-            if (fpr == NULL) {
-                //sendErrorMsg(client->fd, EOPEN);
-                //setMyErrno(EOPEN);
-                myErrno=EOPEN;
-                free(pathname);
-                return NULL;
-            }
+    // file error
+    if (fpr == NULL) {
+        myErrno=EOPEN;
+        free(pathname);
+        return NULL;
+    }
 
-            // get file size
-            /*struct stat st;
-            stat(pathname, &st);
-            st.st_size*/
-            long file_size = fileExists(pathname);
-            free(pathname);
-            // read the file and prepare data message
-            char *data = (char *)malloc(file_size * sizeof(char) + 1);
-            if(data==NULL){
-                //sendErrorMsg(client->fd, errno);
-                //setMyErrno(EUNK);
-                myErrno=EUNK;
-                return NULL;
-            }
-            char out;
-            int counter = 0;
-            while ((out = fgetc(fpr)) != EOF) data[counter++] = (char)out;
-            data[counter] = '\0';
-            fclose(fpr);
-            return data;
+    // get file size
+    long file_size = fileExists(pathname);
+    if(file_size<1) {
+        return NULL;
+    }
+    free(pathname);
+    // read the file and prepare data message
+    char *data = (char *)malloc(file_size * sizeof(char) + 1);
+    if(data==NULL){
+        myErrno=EUNK;
+        return NULL;
+    }
+    char out;
+    int counter = 0;
+    while ((out = fgetc(fpr)) != EOF) data[counter++] = (char)out; //leggo
+    data[counter] = '\0';
+    fclose(fpr);
+    fprintf(stderr, "RETRIEVED: Client name {%s}, File Name {%s}, Lenght {%ld}\n", client->name, fileName, file_size);
+    return data;
             
 }
 
-long os_delete(t_client* client, char* dataName){
-    int path_len = strlen("data") + strlen(client->name) + strlen(dataName) + 2 + 1 + 4;
+long os_delete(client_t* client, char* fileName){
+    //creo il path
+    int path_len = strlen("data") + strlen(client->name) + strlen(fileName) + 2 + 1 + 4;
     char *pathname= (char *)malloc(path_len * sizeof(char));
     if(pathname==NULL){
-        //sendErrorMsg(client->fd, errno);
-        //setMyErrno(EUNK);
         myErrno=EUNK;
         return 0;
     }
-    snprintf(pathname, path_len, "data/%s/%s.bin", client->name, dataName);
+    snprintf(pathname, path_len, "data/%s/%s.bin", client->name, fileName);
 
     //fprintf(stderr, "Pathname: %s", pathname);
 
     long file_size = fileExists(pathname);
-
     // delete file
     int result=remove(pathname);
     free(pathname);
     if (result == 0) {
-        
+        fprintf(stderr, "DELETED: Client name {%s}, File Name {%s}\n", client->name, fileName);
         return file_size;
     } else {
-        //sendErrorMsg(client->fd, EDEL);
-        //setMyErrno(EDEL);
         myErrno=EDEL;
         return 0;
     }
 }
 
-void os_leave(t_clientList* connectedClient, t_client* client){
+void os_leave(clientList_t* connectedClient, client_t* client){
+    fprintf(stderr, "LEAVE: Client name {%s} \n", client->name);
     removeClient(connectedClient, client);
 }
 
+/*Invia risposta con errore al client */
+int sendErrorMsg(long fd){
+    const char *err=getErrMsg();
+    long len=sizeof(char)*((strlen("KO  \n")+strlen(err)+1));
+    char *msg;
+    MALLOC(msg, (char*)malloc(len), "Malloc");
+    if(msg==NULL){
+        return 0;
+    }
+    snprintf(msg, len, "KO %s \n", err);
+    int result=myWrite(fd, msg, strlen(msg)*sizeof(char));
+    
+    free(msg);
+    return result;
+}
+
+/*invia ok al client */
+int sendOkMsg(long fd){
+    int result=myWrite(fd, "OK \n", 5 * sizeof(char));
+    //fprintf(stderr, "OK\n");
+    return result;
+}

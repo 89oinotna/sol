@@ -1,3 +1,13 @@
+/**
+ * @file libosserver.h
+ * @author Antonio Zegarelli
+ * @brief 
+ * @version 0.1
+ * @date 2019-07-04
+ * 
+ * @copyright Copyright (c) 2019
+ * 
+ */
 #if !defined(OSSERVER_H_)
 #define OSSERVER_H_
 #define _POSIX_C_SOURCE 200112L //per strtok_r
@@ -18,93 +28,205 @@
 #include <sys/types.h>
 #include <dirent.h>
 
+/*
+ * @brief Lunghezza massima per il nome
+ * 
+ */
 #define MAXNAMELEN 32
+
+/*
+ * @brief Lunghezza del buffer
+ * 
+ */
 #define BUFFER_SIZE 512
 
-
+/*
+ * @brief nodo client
+ * 
+ */
 typedef struct client {
     char *name;
     long fd;
     struct client *next;
-} t_client;
+} client_t;
 
+/*
+ * @brief Lista dei client
+ * 
+ */
 typedef struct clientList {
-    t_client* head;
+    client_t* head;
     int nClient;
-} t_clientList;
-
-typedef struct cleanUpTh {
-    t_clientList* connectedClient;
-    t_client* client;
-} t_cleanUpTh;
+} clientList_t;
 
 
 
-//function for request management
-typedef t_client* (*manageRequest_t)(char buf[], t_client* client);
+/*
+ * @brief Funzione per la gestione delle richieste
+ * 
+ */
+typedef client_t* (*manageRequest_t)(char buf[], client_t* client);
 
+/*
+ * @brief args da passare al thread gestore del client
+ * 
+ */
 typedef struct{
     long fdc;
-    t_clientList* connectedClient;
+    clientList_t* connectedClient;
     manageRequest_t manage;
 } args_handler_t;
 
-
+/*
+ * @brief Funzione esterna per inviare messaggi di errore
+ * 
+ * @param fd File descriptor del client
+ * @return int 
+ */
 extern int sendErrorMsg(long fd);
 
-/* inizializza la struttura del client con il suo fd
-in caso di errore return null */
-t_client *initClient(long fd);
 
-/*Controlla se esiste già un client connesso con nome
-return 1 se c'è, 0 altrimenti */
-int Connected(t_clientList* connectedClient, char *name);
+/*
+ * @brief inizializza la struttura del client con il suo fd
+ * 
+ * @param fd File Descriptor del client
+ * @return client_t*, null in caso di errore 
+ */
+client_t *initClient(long fd);
 
-/*Aggiunge il client alla lista dei client connessi
-Return struttura client con il nome inizializzato oppure client->name==NULL in caso di errore */
-t_client *addClient(t_clientList* connectedClient, t_client *client, char *name);
+/*
+ * @brief Controlla se esiste già un client connesso con nome
+ * 
+ * @param connectedClient Lista dei client
+ * @param name Nome del client
+ * @return 1 se è presente, 0 altrimenti 
+ */
+int connected(clientList_t* connectedClient, char *name);
 
-/*Rimuove il client dalla lista dei client connessi e elimina client dalla memoria*/
-void removeClient(t_clientList* connectedClient, t_client *client);
+/*
+ * @brief Aggiunge il client alla lista dei client connessi
+ * 
+ * @param connectedClient Lista dei client
+ * @param client 
+ * @param name Nome del client
+ * @return client_t* con il nome inizializzato oppure client->name==NULL in caso di errore 
+ */
+client_t* addClient(clientList_t* connectedClient, client_t *client, char *name);
 
-/*Funzione gestione thread */
+/*
+ * @brief Rimuove il client dalla lista
+ * 
+ * @param connectedClient Lista dei client
+ * @param client 
+ */
+void removeClient(clientList_t* connectedClient, client_t *client);
+
+
+/*
+ * @brief   Funzione principale del thread che gestisce un client
+ *          Se ho problemi nell'inizializzare un client setta myErrno 
+ *          e invia un messaggio di errore
+ * 
+ * @param arg args_handler_t
+ */
 void *threadF(void *arg);
 
-/*Funzione per gestire la creazione del thread */
-void spawn_thread(t_clientList* connectedClient, long connfd, void *manageRequest);
+/*
+ * @brief Funzione per gestire la creazione dei thread
+ * 
+ * @param connectedClient Lista dei client
+ * @param connfd File descriptor del client
+ * @param manageRequest Funzione di gestione richieste
+ */
+void spawn_thread(clientList_t* connectedClient, long connfd, void *manageRequest);
 
-//void gestore();
-//void signal_manager();
 
-void cleanup_thread_handler(void *arg);
 
-/*Write personalizzata */
-int myWrite(long fd, char* msg, size_t len);
 
-/*Read personalizzata */
-int myRead(long fd, char* buf);
+/*
+ * @brief Sposta il file da tmp a data
+ * 
+ * @param tmpFilePath Path del file tmp
+ * @param permFilePath Path dove spostare il file
+ * @return 1 oppure 0 in caso di errore e setta myErrno
+ */
+int save(char* tmpFilePath, char* permFilePath);
 
-/*Salvataggio da tmp a data */
-int save(char* fileToWrite, char* fileToWriteN);
-
-void disconnectAll(t_clientList* connectedClient);
-
+/*
+ * @brief Inizializza il server
+ * 
+ * @return fd File Descriptor del socket
+ */
 int os_start();
 
-/*Ritorna null se ho errori
-ritorna il client senza nome se non è stato aggiunto
-ritorna client inizializzato con name se aggiunto
+/*
+ * @brief Funzione che registra un client
+ * 
+ * @param connectedClient Lista dei client connessi
+ * @param client 
+ * @param user Nome del client
+ * @return client_t* con name=user oppure name=null in caso di errore e setta myErrno
  */
-t_client* os_register(t_clientList* connectedClient, t_client * client, char* user);
+client_t* os_register(clientList_t* connectedClient, client_t * client, char* user);
 
-long os_store(t_clientList* connectedClient, t_client* client, char* fileData, char* fileName, long fileLength);
+/*
+ * @brief Funzione per il salvataggio di un dato
+ * 
+ * @param client 
+ * @param fileData Prima parte del dato
+ * @param fileName Nome del file
+ * @param fileLength Lunghezza totale del dato
+ * @return long lunghezza del dato salvato se esiste, 
+ *          0 se il file non esiste, 
+ *          -1 in caso di errore e setta myErrno
+ */
+long os_store(client_t* client, char* fileData, char* fileName, long fileLength);
 
-void* os_retrieve(t_client* client, char* fileName);
+/*
+ * @brief Funzione per la lettura di un dato
+ * 
+ * @param client 
+ * @param fileName 
+ * @return void* puntatore al dato (allocato nell'heap) oppure NULL in caso di errore e setta myErrno
+ */
+void* os_retrieve(client_t* client, char* fileName);
 
-long os_delete(t_client* client, char* dataName);
+/*
+ * @brief Funzione per la cancellazione di un dato
+ * 
+ * @param client 
+ * @param dataName 
+ * @return long grandezza del file eliminato oppure 0 in caso di errore e setta myErrno
+ */
+long os_delete(client_t* client, char* fileName);
 
-void os_leave(t_clientList* connectedClient, t_client* client);
+/*
+ * @brief Funzione per la disconnessione di un client
+ * 
+ * @param connectedClient Lista dei client connessi
+ * @param client 
+ */
+void os_leave(clientList_t* connectedClient, client_t* client);
 
+/*
+ * @brief effettua l'unlink del socket
+ * 
+ */
 void cleanup();
 
+/*
+ * @brief Invia il messaggio di errore al client
+ * 
+ * @param fd File descriptor del client
+ * @return int lunghezza del messaggio oppure 0 in caso di errore
+ */
+int sendErrorMsg(long fd);
+
+/*
+ * @brief Invia ok al client
+ * 
+ * @param fd File descriptor del client
+ * @return int lunghezza del messaggio oppure 0 in caso di errore
+ */
+int sendOkMsg(long fd);
 #endif 
